@@ -76,7 +76,37 @@ func main() {
 
 	})
 
-	app.Post("/employee")
+	// Add a new employee in the database
+	app.Post("/employee", func(c *fiber.Ctx) error {
+
+		collection := mg.Db.Collection("employees")
+
+		employee := new(Employee)
+
+		if err := c.BodyParser(employee); err != nil {
+			return c.Status(400).SendString(err.Error())
+		}
+
+		employee.ID = "" // We always want mongodb to create its own ids
+
+		// We want to get the id from this insertionResult, because this id we'll use that to search the actual record that has just been inserted in the database
+		insertionResult, err := collection.InsertOne(c.Context(), employee)
+
+		if err != nil {
+			return c.Status(500).SendString(err.Error())
+		}
+
+		// After finding that record we want to return that to the frontend
+		filter := bson.D{{Key: "_id", Value: insertionResult.InsertedID}}
+		createdRecord := collection.FindOne(c.Context(), filter)
+
+		createdEmployee := &Employee{}
+		createdRecord.Decode(createdEmployee)
+
+		return c.Status(201).JSON(createdEmployee)
+
+	})
+
 	app.Put("/employee/:id")
 	app.Delete("/employee/:id")
 
