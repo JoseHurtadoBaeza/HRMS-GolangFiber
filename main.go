@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -19,7 +20,7 @@ type MongoInstance struct {
 var mg MongoInstance
 
 const dbName = "fiber-hrms"
-const mongoURI = "mongodb://localhost:27017" + dbName
+const mongoURI = "mongodb://localhost:27017/" + dbName
 
 type Employee struct {
 	ID     string  `json:"id,omitempty" bson:"_id, omitempty"`
@@ -84,7 +85,7 @@ func main() {
 		employee := new(Employee)
 
 		if err := c.BodyParser(employee); err != nil {
-			return c.Status(400).SendString(err.Error())
+			return c.Status(404).SendString(err.Error())
 		}
 
 		employee.ID = "" // We always want mongodb to create its own ids
@@ -107,7 +108,78 @@ func main() {
 
 	})
 
-	app.Put("/employee/:id")
-	app.Delete("/employee/:id")
+	// Update an employee in the database
+	app.Put("/employee/:id", func(c *fiber.Ctx) error {
+
+		idParam := c.Params("id")
+
+		employeeID, err := primitive.ObjectIDFromHex(idParam)
+
+		if err != nil {
+			return c.SendStatus(404)
+		}
+
+		employee := new(Employee)
+
+		if err := c.BodyParser(employee); err != nil {
+			return c.Status(404).SendString(err.Error())
+		}
+
+		query := bson.D{{Key: "_id", Value: employeeID}}
+
+		// Build the update query
+		update := bson.D{
+			{
+				Key: "$set",
+				Value: bson.D{
+					{Key: "name", Value: employee.Name},
+					{Key: "age", Value: employee.Age},
+					{Key: "salary", Value: employee.Salary},
+				},
+			},
+		}
+
+		err = mg.Db.Collection("employees").FindOneAndUpdate(c.Context(), query, update).Err()
+
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				return c.SendStatus(404)
+			}
+			return c.SendStatus(500)
+		}
+
+		employee.ID = idParam
+
+		return c.Status(200).JSON(employee)
+
+	})
+
+	// Delete an employee from the database
+	app.Delete("/employee/:id", func(c *fiber.Ctx) error {
+
+		employeeID, err := primitive.ObjectIDFromHex(c.Params("id"))
+
+		if err != nil {
+			return c.SendStatus(404)
+		}
+
+		query := bson.D{{Key: "_id", Value: employeeID}}
+
+		result, err := mg.Db.Collection("employees").DeleteOne(c.Context(), &query)
+
+		if err != nil {
+			return c.SendStatus(500)
+		}
+
+		// If it didn't get deleted
+		if result.DeletedCount < 1 {
+			return c.SendStatus(404)
+		}
+
+		return c.Status(200).JSON("record deleted")
+
+	})
+
+	log.Fatal(app.Listen(":3000"))
 
 }
